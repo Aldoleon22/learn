@@ -1,0 +1,16 @@
+{
+    "name": "Code Master - Apprends JavaScript & Python",
+    "short_name": "Code Master",
+    "description": "Apprends JavaScript et Python de A a Z avec des jeux et defis interactifs",
+    "start_url": "/",
+    "display": "standalone",
+    "orientation": "any",
+    "background_color": "#0a0a1a",
+    "theme_color": "#0a0a1a",
+    "lang": "fr",
+    "icons": [
+        { "src": "/assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+        { "src": "/assets/icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+    ],
+    "categories": ["education", "games"]
+}
