@@ -4,6 +4,7 @@
 import { getQuizQuestions } from '../data/quiz-questions.js'
 import { getBugSnippets } from '../data/bug-snippets.js'
 import { getMemoryPairs, buildMemoryBoard } from '../data/memory-pairs.js'
+import { getGeneratedQuestions } from '../lib/questionGenerator.js'
 
 const ROUND_TYPES = ['quiz', 'debug', 'output', 'memory']
 
@@ -102,14 +103,13 @@ export default class AIChallenge {
   _generateRounds() {
     const rounds = []
     const gameStats = this.config.gameStats || {}
-    const userLevel = this.config.userLevel || 1
 
-    // Determine target difficulty based on player level
-    let targetDiff = 1
-    if (userLevel >= 7) targetDiff = 3
-    else if (userLevel >= 4) targetDiff = 2
+    // Pull generated questions from cache (OpenAI) — anti-répétition via hash
+    const genQuiz = getGeneratedQuestions('quiz', this.lang, 3)
+    const genOutput = getGeneratedQuestions('output', this.lang, 2)
+    const genBug = getGeneratedQuestions('bug', this.lang, 2)
 
-    // Get all data pools
+    // Static pools as fallback
     const quizPool = shuffle([...getQuizQuestions(this.lang)])
     const bugPool = shuffle([...getBugSnippets(this.lang)])
     const outputPool = shuffle([...(this.lang === 'python' ? PY_OUTPUT_QUESTIONS : JS_OUTPUT_QUESTIONS)])
@@ -124,25 +124,26 @@ export default class AIChallenge {
     for (const type of roundTypes) {
       switch (type) {
         case 'quiz': {
-          const q = quizPool.pop()
-          if (q) rounds.push({ type: 'quiz', data: q })
+          // Priorité : question générée par OpenAI, sinon statique
+          const q = genQuiz.pop() || quizPool.pop()
+          if (q) rounds.push({ type: 'quiz', data: q, generated: !!q._hash })
           break
         }
         case 'debug': {
-          const b = bugPool.pop()
-          if (b) rounds.push({ type: 'debug', data: b })
+          const b = genBug.pop() || bugPool.pop()
+          if (b) rounds.push({ type: 'debug', data: b, generated: !!b._hash })
           break
         }
         case 'output': {
-          const o = outputPool.pop()
-          if (o) rounds.push({ type: 'output', data: o })
+          const o = genOutput.pop() || outputPool.pop()
+          if (o) rounds.push({ type: 'output', data: o, generated: !!o._hash })
           break
         }
         case 'memory': {
           const m = memoryPool.pop()
           if (m) {
             const pairs = shuffle([...m.pairs]).slice(0, 4)
-            rounds.push({ type: 'memory', data: { ...m, pairs } })
+            rounds.push({ type: 'memory', data: { ...m, pairs }, generated: false })
           }
           break
         }
@@ -151,7 +152,7 @@ export default class AIChallenge {
 
     // Fallback: if not enough rounds, fill with quiz
     while (rounds.length < 4 && quizPool.length > 0) {
-      rounds.push({ type: 'quiz', data: quizPool.pop() })
+      rounds.push({ type: 'quiz', data: quizPool.pop(), generated: false })
     }
 
     return rounds
@@ -260,11 +261,15 @@ export default class AIChallenge {
 
     // Show round intro animation
     if (introEl) {
+      const genTag = round.generated
+        ? '<div class="aic-intro-gen">Generee par IA</div>'
+        : ''
       introEl.innerHTML = `
         <div class="aic-intro-card">
           <div class="aic-intro-icon">${ROUND_ICONS[round.type]}</div>
           <div class="aic-intro-name">${ROUND_NAMES[round.type]}</div>
           <div class="aic-intro-num">Round ${this.currentRound + 1}</div>
+          ${genTag}
         </div>
       `
       introEl.style.display = 'block'
@@ -642,6 +647,18 @@ export default class AIChallenge {
       .aic-intro-num {
         font-size: 0.8rem;
         color: var(--text-muted);
+      }
+      .aic-intro-gen {
+        font-size: 0.65rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: #06b6d4;
+        background: rgba(6, 182, 212, 0.12);
+        border: 1px solid rgba(6, 182, 212, 0.3);
+        padding: 2px 10px;
+        border-radius: 999px;
+        margin-top: var(--space-xs);
       }
       @keyframes aic-intro-pop {
         0% { opacity: 0; transform: scale(0.8); }

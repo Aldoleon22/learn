@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import useStore from '@/store/useStore'
 import Modal from '@/components/ui/Modal'
 import { getNextGameRecommendation, getReplayChallenge } from '@/lib/gameAI'
+import { generateBatch, isGeneratorAvailable } from '@/lib/questionGenerator'
 
 const GAME_REGISTRY = {
   'quiz-blitz': () => import('@/games/quiz-blitz'),
@@ -68,6 +69,16 @@ export default function Game() {
     const replayChallenge = getReplayChallenge(gameType, { score, total, pct, earnedXP, time }, currentLangGames)
 
     setResult({ score, total, pct, earnedXP, time, newBest, resultIcon, resultTitle, recommendation, replayChallenge })
+
+    // Génération en arrière-plan : OpenAI crée de nouvelles questions pour le prochain jeu
+    if (isGeneratorAvailable()) {
+      const currentLang = useStore.getState().currentLang
+      generateBatch(currentLang).then(res => {
+        if (res.generated) {
+          console.log('[GameAI] Nouvelles questions generees:', res.counts)
+        }
+      })
+    }
   }, [gameType, setGameStats, awardXP])
 
   const loadGame = useCallback(() => {
