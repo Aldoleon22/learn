@@ -3,6 +3,7 @@ import useStore from '@/store/useStore'
 import StatCard from '@/components/ui/StatCard'
 
 const GAME_DEFINITIONS = [
+  { type: 'ai-challenge', icon: '🤖', title: 'Defi IA', description: 'Un defi unique genere par l\'IA qui cible tes faiblesses', color: '#7c3aed', difficulty: 'Adaptatif', featured: true },
   { type: 'quiz-blitz', icon: '⚡', title: 'Quiz Blitz', description: 'Reponds a un max de questions en 60 secondes', color: '#f0c040', difficulty: 'Facile' },
   { type: 'code-repair', icon: '🔧', title: 'Code Repair', description: 'Trouve et corrige les bugs dans le code', color: '#4dabf7', difficulty: 'Moyen' },
   { type: 'memory-match', icon: '🧠', title: 'Memory Match', description: 'Associe les concepts a leurs definitions', color: '#69db7c', difficulty: 'Facile' },

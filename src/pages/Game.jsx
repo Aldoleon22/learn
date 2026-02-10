@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import useStore from '@/store/useStore'
 import Modal from '@/components/ui/Modal'
+import { getNextGameRecommendation, getReplayChallenge } from '@/lib/gameAI'
 
 const GAME_REGISTRY = {
   'quiz-blitz': () => import('@/games/quiz-blitz'),
@@ -9,6 +10,7 @@ const GAME_REGISTRY = {
   'memory-match': () => import('@/games/memory-match'),
   'speed-type': () => import('@/games/speed-type'),
   'output-guess': () => import('@/games/output-guess'),
+  'ai-challenge': () => import('@/games/ai-challenge'),
 }
 
 const GAME_META = {
@@ -17,6 +19,7 @@ const GAME_META = {
   'memory-match': { icon: '🧠', title: 'Memory Match', color: '#69db7c' },
   'speed-type': { icon: '⌨️', title: 'Speed Type', color: '#e599f7' },
   'output-guess': { icon: '🔮', title: 'Output Guess', color: '#ffa94d' },
+  'ai-challenge': { icon: '🤖', title: 'Defi IA', color: '#7c3aed' },
 }
 
 export default function Game() {
@@ -25,7 +28,6 @@ export default function Game() {
   const lang = useStore(s => s.currentLang)
   const awardXP = useStore(s => s.awardXP)
   const setGameStats = useStore(s => s.setGameStats)
-  const games = useStore(s => s[s.currentLang].games)
 
   const gameAreaRef = useRef(null)
   const gameInstanceRef = useRef(null)
@@ -59,7 +61,13 @@ export default function Game() {
     else if (pct >= 50) { resultIcon = '👍'; resultTitle = 'Pas mal !' }
     else { resultIcon = '💪'; resultTitle = 'Continue !' }
 
-    setResult({ score, total, pct, earnedXP, time, newBest, resultIcon, resultTitle })
+    // AI: Générer la recommandation pour le prochain jeu
+    const currentLangGames = useStore.getState()[useStore.getState().currentLang]?.games || {}
+    const userLevel = useStore.getState().user.level
+    const recommendation = getNextGameRecommendation(gameType, { score, total, pct, earnedXP, time }, currentLangGames, userLevel)
+    const replayChallenge = getReplayChallenge(gameType, { score, total, pct, earnedXP, time }, currentLangGames)
+
+    setResult({ score, total, pct, earnedXP, time, newBest, resultIcon, resultTitle, recommendation, replayChallenge })
   }, [gameType, setGameStats, awardXP])
 
   const loadGame = useCallback(() => {
@@ -74,7 +82,12 @@ export default function Game() {
         if (!GameClass) throw new Error('Module de jeu invalide')
         if (gameAreaRef.current) {
           gameAreaRef.current.innerHTML = ''
-          const game = new GameClass(gameAreaRef.current, lang)
+          // Pass config to AI Challenge so it can adapt to player stats
+          const config = gameType === 'ai-challenge' ? {
+            gameStats: useStore.getState()[useStore.getState().currentLang]?.games || {},
+            userLevel: useStore.getState().user.level,
+          } : undefined
+          const game = new GameClass(gameAreaRef.current, lang, config)
           gameInstanceRef.current = game
           game.onComplete(handleComplete)
           game.start()
@@ -116,7 +129,7 @@ export default function Game() {
         </div>
       </div>
 
-      <div ref={gameAreaRef} className="min-h-[400px]">
+      <div className="min-h-[400px] relative">
         {loading && (
           <div className="flex items-center justify-center min-h-[400px]">
             <div className="text-center">
@@ -135,6 +148,7 @@ export default function Game() {
             </div>
           </div>
         )}
+        <div ref={gameAreaRef} className="min-h-[400px]" />
       </div>
 
       <Modal open={!!result} onClose={() => setResult(null)}>
@@ -162,9 +176,42 @@ export default function Game() {
                 </div>
               )}
             </div>
+
+            {/* AI Recommendation */}
+            {result.recommendation && (
+              <div className="mt-4 mb-4 p-4 rounded-xl border border-accent-primary/30 bg-accent-primary/[0.05] text-left">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-lg">🤖</span>
+                  <span className="font-bold text-sm text-accent-primary">IA Coach recommande</span>
+                </div>
+                <p className="text-text-muted text-sm mb-2">{result.recommendation.reason}</p>
+                <p className="text-xs text-neon-gold italic">{result.recommendation.challenge}</p>
+              </div>
+            )}
+
             <div className="flex gap-3 justify-center flex-wrap">
-              <button onClick={handleReplay} className="btn-neon btn-primary">🔄 Rejouer</button>
-              <button onClick={() => navigate('/games')} className="btn-neon">🎮 Autres jeux</button>
+              <button onClick={handleReplay} className="btn-neon btn-primary" title={result.replayChallenge}>
+                🔄 Rejouer
+              </button>
+              {gameType !== 'ai-challenge' && (
+                <button
+                  onClick={() => navigate('/game/ai-challenge')}
+                  className="btn-neon"
+                  style={{ borderColor: '#7c3aed88', color: '#7c3aed', background: 'rgba(124,58,237,0.08)' }}
+                >
+                  🤖 Defi IA
+                </button>
+              )}
+              {result.recommendation && (
+                <button
+                  onClick={() => navigate(`/game/${result.recommendation.gameType}`)}
+                  className="btn-neon"
+                  style={{ borderColor: `${meta.color}66`, color: meta.color }}
+                >
+                  {result.recommendation.icon} {result.recommendation.title}
+                </button>
+              )}
+              <button onClick={() => navigate('/games')} className="btn-neon">🎮 Tous les jeux</button>
             </div>
           </div>
         )}
