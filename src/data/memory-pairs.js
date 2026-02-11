@@ -1,4 +1,5 @@
 // Memory Pairs - Match code concepts with their descriptions or equivalents
+import { getContent } from './contentSource.js'
 
 const jsMemoryPairs = [
     // Concept <-> Description pairs
@@ -184,6 +185,8 @@ const pythonMemoryPairs = [
 ];
 
 export function getMemoryPairs(lang) {
+    const remote = getContent('memory_pairs', lang, 'default')
+    if (Array.isArray(remote) && remote.length > 0) return remote
     return lang === 'python' ? pythonMemoryPairs : jsMemoryPairs;
 }
 

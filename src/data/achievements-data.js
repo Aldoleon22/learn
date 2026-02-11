@@ -1,4 +1,5 @@
 // Achievements Data - Cross-language achievement definitions and checking logic
+import { getContent } from './contentSource.js'
 
 const ACHIEVEMENTS = [
     // ===== PROGRESSION ACHIEVEMENTS =====
@@ -350,18 +351,35 @@ const RARITY_LABELS = {
     legendary: 'Légendaire'
 };
 
-export const achievementsData = ACHIEVEMENTS;
+const CHECKS_BY_ID = new Map(ACHIEVEMENTS.map(a => [a.id, a.check]));
 
-export function getAllAchievements() {
+function mergeAchievement(remote) {
+    const fallback = ACHIEVEMENTS.find(a => a.id === remote.id) || {};
+    return {
+        ...fallback,
+        ...remote,
+        check: CHECKS_BY_ID.get(remote.id) || fallback.check
+    };
+}
+
+function getAchievementsSource() {
+    const remote = getContent('achievements', null, 'default');
+    if (Array.isArray(remote) && remote.length > 0) {
+        return remote.map(mergeAchievement);
+    }
     return ACHIEVEMENTS;
 }
 
+export function getAllAchievements() {
+    return getAchievementsSource();
+}
+
 export function getAchievementsByCategory(category) {
-    return ACHIEVEMENTS.filter(a => a.category === category);
+    return getAchievementsSource().filter(a => a.category === category);
 }
 
 export function getAchievementById(id) {
-    return ACHIEVEMENTS.find(a => a.id === id);
+    return getAchievementsSource().find(a => a.id === id);
 }
 
 export function getRarityColor(rarity) {
@@ -373,10 +391,11 @@ export function getRarityLabel(rarity) {
 }
 
 export function checkAchievements(state) {
+    const allAchievements = getAchievementsSource();
     const unlocked = state.achievements || [];
     const newlyUnlocked = [];
 
-    for (const achievement of ACHIEVEMENTS) {
+    for (const achievement of allAchievements) {
         if (unlocked.includes(achievement.id)) continue;
         try {
             if (achievement.check(state)) {
@@ -391,15 +410,15 @@ export function checkAchievements(state) {
 }
 
 export function getUnlockedAchievements(unlockedIds) {
-    return ACHIEVEMENTS.filter(a => (unlockedIds || []).includes(a.id));
+    return getAchievementsSource().filter(a => (unlockedIds || []).includes(a.id));
 }
 
 export function getLockedAchievements(unlockedIds) {
-    return ACHIEVEMENTS.filter(a => !(unlockedIds || []).includes(a.id));
+    return getAchievementsSource().filter(a => !(unlockedIds || []).includes(a.id));
 }
 
 export function getAchievementProgress(unlockedIds) {
-    const total = ACHIEVEMENTS.length;
+    const total = getAchievementsSource().length;
     const unlocked = (unlockedIds || []).length;
     return {
         unlocked,

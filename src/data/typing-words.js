@@ -1,4 +1,5 @@
 // Typing Words - Code keywords and snippets for the typing speed game
+import { getContent } from './contentSource.js'
 
 const jsTypingWords = {
     // Level 1: Single keywords (short)
@@ -97,6 +98,8 @@ const pythonTypingWords = {
 };
 
 export function getTypingWords(lang) {
+    const remote = getContent('typing_words', lang, 'default')
+    if (remote && typeof remote === 'object') return remote
     return lang === 'python' ? pythonTypingWords : jsTypingWords;
 }
 

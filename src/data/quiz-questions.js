@@ -1,4 +1,5 @@
 // Quiz Questions - Dual language support (JavaScript & Python)
+import { getContent } from './contentSource.js'
 
 const jsQuestions = [
     // --- Les Bases ---
@@ -331,6 +332,8 @@ const pythonQuestions = [
 ];
 
 export function getQuizQuestions(lang) {
+    const remote = getContent('quiz_questions', lang, 'default')
+    if (Array.isArray(remote) && remote.length > 0) return remote
     return lang === 'python' ? pythonQuestions : jsQuestions;
 }
 

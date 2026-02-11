@@ -2,7 +2,8 @@ import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useStore from '@/store/useStore'
 import { getCurriculum } from '@/data/curriculum'
-import { achievementsData } from '@/data/achievements-data'
+import { getAllAchievements } from '@/data/achievements-data'
+import { getLanguages } from '@/data/contentSource'
 import ProgressBar from '@/components/ui/ProgressBar'
 import StreakCounter from '@/components/ui/StreakCounter'
 import StatCard from '@/components/ui/StatCard'
@@ -17,10 +18,12 @@ export default function Dashboard() {
   const xpProgress = useMemo(() => useStore.getState().getProgressToNextLevel(), [user.xp, user.level])
 
   const curriculum = getCurriculum(lang)
+  const achievementsData = getAllAchievements()
   const completedLessons = Object.values(progress).filter(p => p.completed).length
   const totalLessons = curriculum.reduce((sum, lv) => sum + lv.lessons.length, 0)
-  const langIcon = lang === 'python' ? '🐍' : '⚡'
-  const langName = lang === 'python' ? 'Python' : 'JavaScript'
+  const langMeta = getLanguages().find(l => l.id === lang)
+  const langIcon = langMeta?.icon || (lang === 'python' ? '🐍' : '⚡')
+  const langName = langMeta?.name || (lang === 'python' ? 'Python' : 'JavaScript')
 
   let nextLesson = null
   let nextLevel = null

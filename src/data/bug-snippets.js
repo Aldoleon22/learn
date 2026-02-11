@@ -1,4 +1,5 @@
 // Bug Snippets - Find the bug in code snippets (JS & Python)
+import { getContent } from './contentSource.js'
 
 const jsBugSnippets = [
     {
@@ -187,6 +188,8 @@ const pythonBugSnippets = [
 ];
 
 export function getBugSnippets(lang) {
+    const remote = getContent('bug_snippets', lang, 'default')
+    if (Array.isArray(remote) && remote.length > 0) return remote
     return lang === 'python' ? pythonBugSnippets : jsBugSnippets;
 }
 

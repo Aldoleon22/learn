@@ -15,14 +15,16 @@ The React Compiler is not enabled on this template because of its impact on dev 
 
 If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
 
-## Profile MySQL (API)
+## Profile + Content MySQL (API)
 
-This project now includes a small Express API for persisting the user profile in MySQL.
+This project now includes a small Express API for persisting the user profile and all learning content in MySQL.
 
 Setup:
 - Copy `.env.server.example` to `.env.server` and fill in your MySQL credentials.
 - Create the database in MySQL (e.g. `code_master`).
-- Optionally run `server/schema.sql` if you prefer manual setup; the server also creates the table automatically.
+- Optionally run `server/schema.sql` if you prefer manual setup; the server also creates tables automatically.
+- Seed content from the current JS files: `npm run seed:content`
+- To enable AI content generation, set `GROQ_API_KEY` in `.env.server`.
 
 Run:
 - Terminal 1: `npm run dev` (Vite frontend, port 5173)

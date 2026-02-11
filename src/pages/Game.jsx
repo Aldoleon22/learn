@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import useStore from '@/store/useStore'
 import Modal from '@/components/ui/Modal'
 import { getNextGameRecommendation, getReplayChallenge } from '@/lib/gameAI'
+import { getLanguages } from '@/data/contentSource'
 import { generateBatch, isGeneratorAvailable } from '@/lib/questionGenerator'
 
 const GAME_REGISTRY = {
@@ -37,7 +38,8 @@ export default function Game() {
   const [result, setResult] = useState(null)
 
   const meta = GAME_META[gameType]
-  const langName = lang === 'python' ? 'Python' : 'JavaScript'
+  const langMeta = getLanguages().find(l => l.id === lang)
+  const langName = langMeta?.name || (lang === 'python' ? 'Python' : 'JavaScript')
 
   const handleComplete = useCallback((gameResult) => {
     const { score = 0, total = 0, xp: earnedXP = 0, time = 0 } = gameResult

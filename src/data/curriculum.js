@@ -1,4 +1,5 @@
 // Unified curriculum - returns lessons based on current language
+import { getContent } from './contentSource.js'
 
 const jsCurriculum = [
     {
@@ -213,6 +214,8 @@ const pythonCurriculum = [
 ];
 
 export function getCurriculum(lang) {
+    const remote = getContent('curriculum', lang, 'default')
+    if (Array.isArray(remote) && remote.length > 0) return remote
     return lang === 'python' ? pythonCurriculum : jsCurriculum;
 }
 

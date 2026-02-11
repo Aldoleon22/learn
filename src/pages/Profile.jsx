@@ -2,7 +2,8 @@ import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useStore from '@/store/useStore'
 import { getCurriculum } from '@/data/curriculum'
-import { achievementsData, getRarityLabel, getRarityColor } from '@/data/achievements-data'
+import { getAllAchievements, getRarityLabel, getRarityColor } from '@/data/achievements-data'
+import { getLanguages } from '@/data/contentSource'
 import ProgressBar from '@/components/ui/ProgressBar'
 import StatCard from '@/components/ui/StatCard'
 import { useToast } from '@/components/ui/ToastProvider'
@@ -17,12 +18,14 @@ export default function Profile() {
   const setLang = useStore(s => s.setLang)
   const reset = useStore(s => s.reset)
   const xpProgress = useMemo(() => useStore.getState().getProgressToNextLevel(), [user.xp, user.level])
+  const achievementsData = getAllAchievements()
 
   const [nameInput, setNameInput] = useState(user.name)
   const [showReset, setShowReset] = useState(false)
 
   const langStats = {}
-  for (const lang of ['js', 'python']) {
+  const availableLangs = getLanguages().map(l => l.id)
+  for (const lang of availableLangs) {
     const state = useStore.getState()
     const progressData = state[lang]?.progress || {}
     const gamesData = state[lang]?.games || {}
@@ -35,8 +38,8 @@ export default function Profile() {
   }
 
   const joinDate = user.createdAt ? new Date(user.createdAt).toLocaleDateString('fr-FR', { year: 'numeric', month: 'long', day: 'numeric' }) : 'Inconnu'
-  const totalLessonsAll = langStats.js.completedLessons + langStats.python.completedLessons
-  const totalGames = langStats.js.totalGamesPlayed + langStats.python.totalGamesPlayed
+  const totalLessonsAll = Object.values(langStats).reduce((sum, s) => sum + (s?.completedLessons || 0), 0)
+  const totalGames = Object.values(langStats).reduce((sum, s) => sum + (s?.totalGamesPlayed || 0), 0)
 
   const handleSaveName = () => {
     const name = nameInput.trim()
@@ -80,10 +83,12 @@ export default function Profile() {
 
       <h2 className="text-lg font-bold mb-4">Progression par langage</h2>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-        {['js', 'python'].map(lang => {
+        {getLanguages().map(langItem => {
+          const lang = langItem.id
           const s = langStats[lang]
-          const icon = lang === 'python' ? '🐍' : '⚡'
-          const name = lang === 'python' ? 'Python' : 'JavaScript'
+          if (!s) return null
+          const icon = langItem.icon || (lang === 'python' ? '🐍' : '⚡')
+          const name = langItem.name || (lang === 'python' ? 'Python' : 'JavaScript')
           const isActive = lang === currentLang
           return (
             <div key={lang} className="neon-card" style={{ borderColor: isActive ? 'var(--accent-primary)' : undefined, boxShadow: isActive ? '0 0 15px rgba(0,255,136,0.13)' : undefined }}>
@@ -135,6 +140,10 @@ export default function Profile() {
       <div className="neon-card">
         <div className="flex flex-col gap-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
+            <div><strong>Administration</strong><p className="text-text-muted text-xs">Ajouter un nouveau langage</p></div>
+            <button onClick={() => navigate('/admin/language')} className="btn-neon btn-small">➕ Ajouter</button>
+          </div>
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <div><strong>Nom d'affichage</strong><p className="text-text-muted text-xs">Actuellement: {user.name}</p></div>
             <div className="flex gap-2">
               <input type="text" value={nameInput} onChange={e => setNameInput(e.target.value)} className="px-3 py-1.5 bg-bg-input border border-white/[0.06] rounded text-sm text-text-primary max-w-[180px] outline-none focus:border-accent-secondary" placeholder="Nouveau nom" />
@@ -144,8 +153,15 @@ export default function Profile() {
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div><strong>Langage actif</strong><p className="text-text-muted text-xs">Change de parcours</p></div>
             <div className="flex gap-2">
-              <button onClick={() => handleSwitchLang('js')} className={`btn-neon btn-small ${currentLang === 'js' ? 'btn-primary' : ''}`}>⚡ JavaScript</button>
-              <button onClick={() => handleSwitchLang('python')} className={`btn-neon btn-small ${currentLang === 'python' ? 'btn-primary' : ''}`}>🐍 Python</button>
+              {getLanguages().map(langItem => (
+                <button
+                  key={langItem.id}
+                  onClick={() => handleSwitchLang(langItem.id)}
+                  className={`btn-neon btn-small ${currentLang === langItem.id ? 'btn-primary' : ''}`}
+                >
+                  {langItem.icon || '📘'} {langItem.name || langItem.id}
+                </button>
+              ))}
             </div>
           </div>
           <div className="border-t border-white/[0.06] pt-4">

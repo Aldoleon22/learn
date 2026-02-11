@@ -51,7 +51,10 @@ const useStore = create(
 
       // Language
       setLang: (lang) => {
-        set({ currentLang: lang })
+        set((state) => ({
+          currentLang: lang,
+          [lang]: state[lang] || { progress: {}, games: {} },
+        }))
         document.body.dataset.lang = lang
       },
 
@@ -143,32 +146,26 @@ const useStore = create(
         if (typeof nextUser.xp === 'number') nextUser.level = calculateLevel(nextUser.xp)
         if (!nextUser.createdAt) nextUser.createdAt = state.user.createdAt
 
-        const nextJs = incoming.js
-          ? {
-              ...state.js,
-              ...incoming.js,
-              progress: { ...state.js.progress, ...incoming.js.progress },
-              games: { ...state.js.games, ...incoming.js.games },
-            }
-          : state.js
-
-        const nextPython = incoming.python
-          ? {
-              ...state.python,
-              ...incoming.python,
-              progress: { ...state.python.progress, ...incoming.python.progress },
-              games: { ...state.python.games, ...incoming.python.games },
-            }
-          : state.python
-
-        return {
-          ...state,
-          ...incoming,
-          user: nextUser,
-          js: nextJs,
-          python: nextPython,
-          settings: { ...state.settings, ...incoming.settings },
+        // Dynamically merge all language state slices (any key with { progress, games })
+        const merged = { ...state, ...incoming, user: nextUser, settings: { ...state.settings, ...incoming.settings } }
+        const knownKeys = new Set(['user', 'currentLang', 'achievements', 'settings'])
+        for (const key of Object.keys(merged)) {
+          if (knownKeys.has(key)) continue
+          const stateSlice = state[key]
+          const incomingSlice = incoming[key]
+          if (stateSlice && typeof stateSlice === 'object' && 'progress' in stateSlice) {
+            merged[key] = incomingSlice
+              ? {
+                  ...stateSlice,
+                  ...incomingSlice,
+                  progress: { ...stateSlice.progress, ...incomingSlice?.progress },
+                  games: { ...stateSlice.games, ...incomingSlice?.games },
+                }
+              : stateSlice
+          }
         }
+
+        return merged
       }),
 
       // Reset

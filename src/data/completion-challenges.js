@@ -1,4 +1,5 @@
 // Completion Challenges - Fill in the blanks in code snippets
+import { getContent } from './contentSource.js'
 
 const jsChallenges = [
     // --- Difficulty 1: Basics ---
@@ -193,6 +194,8 @@ const pythonChallenges = [
 ];
 
 export function getCompletionChallenges(lang) {
+    const remote = getContent('completion_challenges', lang, 'default')
+    if (Array.isArray(remote) && remote.length > 0) return remote
     return lang === 'python' ? pythonChallenges : jsChallenges;
 }
 

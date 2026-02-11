@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useStore from '@/store/useStore'
 import { getCurriculum } from '@/data/curriculum'
+import { getLanguages } from '@/data/contentSource'
 import ProgressBar from '@/components/ui/ProgressBar'
 
 export default function Curriculum() {
@@ -11,8 +12,9 @@ export default function Curriculum() {
   const progress = useStore(s => s[s.currentLang].progress)
 
   const curriculum = getCurriculum(lang)
-  const langIcon = lang === 'python' ? '🐍' : '⚡'
-  const langName = lang === 'python' ? 'Python' : 'JavaScript'
+  const langMeta = getLanguages().find(l => l.id === lang)
+  const langIcon = langMeta?.icon || (lang === 'python' ? '🐍' : '⚡')
+  const langName = langMeta?.name || (lang === 'python' ? 'Python' : 'JavaScript')
   const completedLessons = Object.values(progress).filter(p => p.completed).length
   const totalLessons = curriculum.reduce((sum, lv) => sum + lv.lessons.length, 0)
 
