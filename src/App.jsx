@@ -5,6 +5,7 @@ import { ToastProvider } from './components/ui/ToastProvider'
 import LevelUpOverlay from './components/ui/LevelUpOverlay'
 import { useAchievements } from './hooks/useAchievements'
 import { useStreak } from './hooks/useStreak'
+import { useProfileSync } from './hooks/useProfileSync'
 
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Curriculum = lazy(() => import('./pages/Curriculum'))
@@ -25,6 +26,7 @@ function Loading() {
 function AppContent() {
   useAchievements()
   useStreak()
+  useProfileSync()
   return (
     <>
       <Navbar />

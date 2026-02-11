@@ -137,6 +137,39 @@ const useStore = create(
 
       // User
       setUserName: (name) => set((state) => ({ user: { ...state.user, name } })),
+      applyProfile: (incoming) => set((state) => {
+        if (!incoming || typeof incoming !== 'object') return state
+        const nextUser = { ...state.user, ...incoming.user }
+        if (typeof nextUser.xp === 'number') nextUser.level = calculateLevel(nextUser.xp)
+        if (!nextUser.createdAt) nextUser.createdAt = state.user.createdAt
+
+        const nextJs = incoming.js
+          ? {
+              ...state.js,
+              ...incoming.js,
+              progress: { ...state.js.progress, ...incoming.js.progress },
+              games: { ...state.js.games, ...incoming.js.games },
+            }
+          : state.js
+
+        const nextPython = incoming.python
+          ? {
+              ...state.python,
+              ...incoming.python,
+              progress: { ...state.python.progress, ...incoming.python.progress },
+              games: { ...state.python.games, ...incoming.python.games },
+            }
+          : state.python
+
+        return {
+          ...state,
+          ...incoming,
+          user: nextUser,
+          js: nextJs,
+          python: nextPython,
+          settings: { ...state.settings, ...incoming.settings },
+        }
+      }),
 
       // Reset
       reset: () => set({ ...DEFAULT_STATE, user: { ...DEFAULT_STATE.user, createdAt: new Date().toISOString() } }),
