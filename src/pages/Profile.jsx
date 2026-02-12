@@ -1,9 +1,11 @@
 import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useStore from '@/store/useStore'
+import useContentStore from '@/store/contentStore'
 import { getCurriculum } from '@/data/curriculum'
 import { getAllAchievements, getRarityLabel, getRarityColor } from '@/data/achievements-data'
 import { getLanguages } from '@/data/contentSource'
+import { deleteLanguage, exportLanguage, importLanguage } from '@/lib/contentApi'
 import ProgressBar from '@/components/ui/ProgressBar'
 import StatCard from '@/components/ui/StatCard'
 import { useToast } from '@/components/ui/ToastProvider'
@@ -22,6 +24,10 @@ export default function Profile() {
 
   const [nameInput, setNameInput] = useState(user.name)
   const [showReset, setShowReset] = useState(false)
+  const [deletingLang, setDeletingLang] = useState(null)
+  const [confirmDelete, setConfirmDelete] = useState(null)
+  const [importing, setImporting] = useState(false)
+  const _content = useContentStore(s => s.content) // subscribe to trigger re-render on refresh
 
   const langStats = {}
   const availableLangs = getLanguages().map(l => l.id)
@@ -47,8 +53,54 @@ export default function Profile() {
     else addToast('Nom invalide (1-30 caracteres)', { type: 'error' })
   }
 
-  const handleSwitchLang = (lang) => {
-    if (lang !== currentLang) { setLang(lang); addToast(`Parcours ${lang === 'python' ? 'Python' : 'JavaScript'} active !`, { type: 'success' }) }
+  const handleSwitchLang = (langId) => {
+    if (langId !== currentLang) {
+      setLang(langId)
+      const langItem = getLanguages().find(l => l.id === langId)
+      addToast(`Parcours ${langItem?.name || langId} active !`, { type: 'success' })
+    }
+  }
+
+  const builtInLangs = ['js', 'python']
+
+  const handleExport = async (langId) => {
+    try {
+      await exportLanguage(langId)
+      addToast('Export telecharge !', { type: 'success' })
+    } catch {
+      addToast('Erreur lors de l\'export', { type: 'error' })
+    }
+  }
+
+  const handleImport = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    setImporting(true)
+    try {
+      await importLanguage(file)
+      await useContentStore.getState().refresh()
+      addToast('Langage importe avec succes !', { type: 'success' })
+    } catch (err) {
+      addToast(err.message === 'invalid_format' ? 'Fichier JSON invalide' : 'Erreur lors de l\'import', { type: 'error' })
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  const handleDeleteLang = async (langId) => {
+    setDeletingLang(langId)
+    try {
+      await deleteLanguage(langId)
+      if (currentLang === langId) setLang('js')
+      await useContentStore.getState().refresh()
+      addToast('Langage supprime !', { type: 'success' })
+    } catch (e) {
+      addToast(e.message === 'cannot_delete_builtin' ? 'Impossible de supprimer un langage par defaut' : 'Erreur lors de la suppression', { type: 'error' })
+    } finally {
+      setDeletingLang(null)
+      setConfirmDelete(null)
+    }
   }
 
   const handleReset = () => { reset(); addToast('Toutes les donnees ont ete supprimees.', { type: 'success' }); setTimeout(() => navigate('/dashboard'), 1000) }
@@ -139,9 +191,56 @@ export default function Profile() {
       <h2 className="text-lg font-bold mb-4">Parametres</h2>
       <div className="neon-card">
         <div className="flex flex-col gap-4">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <div><strong>Administration</strong><p className="text-text-muted text-xs">Ajouter un nouveau langage</p></div>
-            <button onClick={() => navigate('/admin/language')} className="btn-neon btn-small">➕ Ajouter</button>
+          <div>
+            <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+              <div><strong>Langages installes</strong><p className="text-text-muted text-xs">Gere les langages disponibles</p></div>
+              <div className="flex gap-2">
+                <label className={`btn-neon btn-small cursor-pointer ${importing ? 'opacity-50 pointer-events-none' : ''}`}>
+                  {importing ? '...' : 'Importer'}
+                  <input type="file" accept=".json" onChange={handleImport} className="hidden" />
+                </label>
+                <button onClick={() => navigate('/admin/language')} className="btn-neon btn-small">+ Ajouter</button>
+              </div>
+            </div>
+            <div className="flex flex-col gap-2">
+              {getLanguages().map(langItem => {
+                const isBuiltIn = builtInLangs.includes(langItem.id)
+                const isConfirming = confirmDelete === langItem.id
+                const isDeleting = deletingLang === langItem.id
+                return (
+                  <div key={langItem.id} className="flex items-center justify-between p-3 rounded-lg bg-bg-secondary">
+                    <div className="flex items-center gap-3">
+                      <span className="text-xl">{langItem.icon || '📘'}</span>
+                      <div>
+                        <span className="font-semibold text-sm">{langItem.name || langItem.id}</span>
+                        {isBuiltIn && <span className="ml-2 text-[0.65rem] px-1.5 py-0.5 rounded-full bg-white/5 text-text-muted">par defaut</span>}
+                        {langItem.id === currentLang && <span className="ml-2 text-[0.65rem] px-1.5 py-0.5 rounded-full bg-accent-primary/10 text-accent-primary border border-accent-primary/30">actif</span>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => handleExport(langItem.id)} className="px-2 py-1 rounded text-xs font-semibold bg-accent-primary/10 text-accent-primary border border-accent-primary/30 cursor-pointer hover:bg-accent-primary/20 transition-colors" title="Exporter">
+                        Exporter
+                      </button>
+                      {!isBuiltIn && (
+                        isConfirming ? (
+                          <>
+                            <span className="text-xs text-text-muted">Supprimer ?</span>
+                            <button onClick={() => handleDeleteLang(langItem.id)} disabled={isDeleting} className="px-2 py-1 rounded text-xs font-semibold bg-neon-red text-white border-none cursor-pointer disabled:opacity-50">
+                              {isDeleting ? '...' : 'Oui'}
+                            </button>
+                            <button onClick={() => setConfirmDelete(null)} className="px-2 py-1 rounded text-xs font-semibold bg-white/10 text-text-primary border-none cursor-pointer">Non</button>
+                          </>
+                        ) : (
+                          <button onClick={() => setConfirmDelete(langItem.id)} className="px-2 py-1 rounded text-xs font-semibold bg-neon-red/10 text-neon-red border border-neon-red/30 cursor-pointer hover:bg-neon-red/20 transition-colors">
+                            Supprimer
+                          </button>
+                        )
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
           </div>
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div><strong>Nom d'affichage</strong><p className="text-text-muted text-xs">Actuellement: {user.name}</p></div>

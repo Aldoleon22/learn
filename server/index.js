@@ -2,10 +2,15 @@ import express from 'express'
 import cors from 'cors'
 import dotenv from 'dotenv'
 import mysql from 'mysql2/promise'
+import path from 'path'
+import { fileURLToPath } from 'url'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 dotenv.config({ path: process.env.DOTENV_PATH || '.env.server' })
 
 const {
+  DATABASE_URL,
   DB_HOST = '127.0.0.1',
   DB_PORT = '3306',
   DB_USER = 'root',
@@ -16,15 +21,17 @@ const {
   GROQ_API_KEY,
 } = process.env
 
-const pool = mysql.createPool({
-  host: DB_HOST,
-  port: Number(DB_PORT),
-  user: DB_USER,
-  password: DB_PASSWORD,
-  database: DB_NAME,
-  waitForConnections: true,
-  connectionLimit: 10,
-})
+const pool = DATABASE_URL
+  ? mysql.createPool({ uri: DATABASE_URL, waitForConnections: true, connectionLimit: 10, ssl: { rejectUnauthorized: true } })
+  : mysql.createPool({
+      host: DB_HOST,
+      port: Number(DB_PORT),
+      user: DB_USER,
+      password: DB_PASSWORD,
+      database: DB_NAME,
+      waitForConnections: true,
+      connectionLimit: 10,
+    })
 
 async function ensureSchema() {
   await pool.query(`
@@ -50,8 +57,12 @@ async function ensureSchema() {
 }
 
 const app = express()
-app.use(express.json({ limit: '1mb' }))
+app.use(express.json({ limit: '10mb' }))
 app.use(cors(CORS_ORIGIN ? { origin: CORS_ORIGIN } : undefined))
+
+// Serve frontend build in production
+const distPath = path.join(__dirname, '..', 'dist')
+app.use(express.static(distPath))
 
 // ── Health ───────────────────────────────────────────────────────────
 app.get('/api/health', async (_req, res) => {
@@ -127,6 +138,40 @@ app.get('/api/content', async (req, res) => {
   }
 })
 
+// ── Languages list ──────────────────────────────────────────────────
+app.get('/api/languages', async (_req, res) => {
+  try {
+    // Get the registered languages list
+    const [rows] = await pool.query(
+      'SELECT data FROM content_items WHERE type = ? AND lang IS NULL AND content_key = ? LIMIT 1',
+      ['languages', 'default']
+    )
+    let languages = []
+    if (rows.length) {
+      const row = rows[0]
+      languages = typeof row.data === 'string' ? JSON.parse(row.data) : row.data
+    }
+    languages = ensureDefaultLanguages(languages)
+
+    // Detect orphan languages that have content but aren't in the list
+    const [orphans] = await pool.query(
+      'SELECT DISTINCT lang FROM content_items WHERE lang IS NOT NULL'
+    )
+    const knownIds = new Set(languages.map(l => l.id))
+    for (const { lang } of orphans) {
+      if (!knownIds.has(lang)) {
+        languages.push({ id: lang, name: lang.charAt(0).toUpperCase() + lang.slice(1), icon: '📦' })
+        knownIds.add(lang)
+      }
+    }
+
+    res.json({ data: languages })
+  } catch (error) {
+    console.error('Load languages failed:', error)
+    res.status(500).json({ error: 'languages_load_failed' })
+  }
+})
+
 app.get('/api/content/all', async (_req, res) => {
   try {
     const [rows] = await pool.query(
@@ -164,14 +209,43 @@ function slugify(input) {
     .replace(/(^-|-$)+/g, '')
 }
 
+function ensureDefaultLanguages(list) {
+  const defaults = [
+    { id: 'js', name: 'JavaScript', icon: '⚡' },
+    { id: 'python', name: 'Python', icon: '🐍' },
+  ]
+  const result = Array.isArray(list) ? [...list] : []
+  const ids = new Set(result.map(l => l.id))
+  for (const d of defaults) {
+    if (!ids.has(d.id)) {
+      result.push(d)
+      ids.add(d.id)
+    }
+  }
+  return result
+}
+
 async function upsertContent(type, lang, key, data) {
   const payload = JSON.stringify(data)
-  await pool.query(
-    `INSERT INTO content_items (type, lang, content_key, data)
-     VALUES (?, ?, ?, CAST(? AS JSON))
-     ON DUPLICATE KEY UPDATE data = VALUES(data), updated_at = CURRENT_TIMESTAMP`,
-    [type, lang || null, key || 'default', payload]
-  )
+  const k = key || 'default'
+  if (lang == null) {
+    // NULL breaks UNIQUE constraint (NULL != NULL), so DELETE + INSERT
+    await pool.query(
+      'DELETE FROM content_items WHERE type = ? AND lang IS NULL AND content_key = ?',
+      [type, k]
+    )
+    await pool.query(
+      'INSERT INTO content_items (type, lang, content_key, data) VALUES (?, NULL, ?, CAST(? AS JSON))',
+      [type, k, payload]
+    )
+  } else {
+    await pool.query(
+      `INSERT INTO content_items (type, lang, content_key, data)
+       VALUES (?, ?, ?, CAST(? AS JSON))
+       ON DUPLICATE KEY UPDATE data = VALUES(data), updated_at = CURRENT_TIMESTAMP`,
+      [type, lang, k, payload]
+    )
+  }
 }
 
 function cleanJson(raw) {
@@ -413,10 +487,8 @@ app.get('/api/content/generate-language', async (req, res) => {
       const row = currentLangs[0]
       languages = typeof row.data === 'string' ? JSON.parse(row.data) : row.data
     }
-    if (!Array.isArray(languages)) languages = []
-    if (!languages.find(l => l.id === languageEntry.id)) {
-      languages.push(languageEntry)
-    }
+    languages = ensureDefaultLanguages(languages)
+    if (!languages.find(l => l.id === languageEntry.id)) languages.push(languageEntry)
 
     const totalLessons = curriculum.reduce((sum, lvl) => sum + lvl.lessons.length, 0)
 
@@ -434,6 +506,240 @@ app.get('/api/content/generate-language', async (req, res) => {
     console.error('Generate language failed:', error)
     send({ step: 'error', message: error.message || 'generation_failed' })
     res.end()
+  }
+})
+
+// ── Export a language ─────────────────────────────────────────────────
+app.get('/api/content/export/:langId', async (req, res) => {
+  const { langId } = req.params
+  if (!langId) return res.status(400).json({ error: 'lang_id_required' })
+
+  try {
+    const [rows] = await pool.query(
+      'SELECT type, data FROM content_items WHERE lang = ?',
+      [langId]
+    )
+    if (!rows.length) return res.status(404).json({ error: 'language_not_found' })
+
+    // Find language info from the languages list
+    const [langRows] = await pool.query(
+      'SELECT data FROM content_items WHERE type = ? AND lang IS NULL AND content_key = ? LIMIT 1',
+      ['languages', 'default']
+    )
+    let langInfo = { id: langId, name: langId, icon: '📦' }
+    if (langRows.length) {
+      const list = typeof langRows[0].data === 'string' ? JSON.parse(langRows[0].data) : langRows[0].data
+      const found = (Array.isArray(list) ? list : []).find(l => l.id === langId)
+      if (found) langInfo = found
+    }
+
+    const content = {}
+    for (const row of rows) {
+      const data = typeof row.data === 'string' ? JSON.parse(row.data) : row.data
+      content[row.type] = data
+    }
+
+    const exportData = { version: 1, language: langInfo, content }
+
+    res.setHeader('Content-Type', 'application/json')
+    res.setHeader('Content-Disposition', `attachment; filename="codemaster-${langId}.json"`)
+    res.json(exportData)
+  } catch (error) {
+    console.error('Export language failed:', error)
+    res.status(500).json({ error: 'export_failed' })
+  }
+})
+
+// ── Import a language ────────────────────────────────────────────────
+app.post('/api/content/import', async (req, res) => {
+  const data = req.body
+  if (!data || !data.language || !data.content) {
+    return res.status(400).json({ error: 'invalid_format' })
+  }
+
+  const langId = slugify(data.language.id || data.language.name)
+  if (!langId) return res.status(400).json({ error: 'invalid_language_id' })
+
+  const langEntry = {
+    id: langId,
+    name: data.language.name || langId,
+    icon: data.language.icon || '📦',
+  }
+
+  const contentTypes = ['curriculum', 'quiz_questions', 'typing_words', 'memory_pairs', 'bug_snippets', 'completion_challenges']
+
+  try {
+    for (const type of contentTypes) {
+      if (data.content[type]) {
+        await upsertContent(type, langId, 'default', data.content[type])
+      }
+    }
+
+    // Add to languages list
+    const [currentLangs] = await pool.query(
+      'SELECT data FROM content_items WHERE type = ? AND lang IS NULL AND content_key = ? LIMIT 1',
+      ['languages', 'default']
+    )
+    let languages = []
+    if (currentLangs.length) {
+      const row = currentLangs[0]
+      languages = typeof row.data === 'string' ? JSON.parse(row.data) : row.data
+    }
+    languages = ensureDefaultLanguages(languages)
+    const existingIdx = languages.findIndex(l => l.id === langEntry.id)
+    if (existingIdx >= 0) {
+      languages[existingIdx] = langEntry
+    } else {
+      languages.push(langEntry)
+    }
+    await upsertContent('languages', null, 'default', languages)
+
+    res.json({ ok: true, language: langEntry })
+  } catch (error) {
+    console.error('Import language failed:', error)
+    res.status(500).json({ error: 'import_failed' })
+  }
+})
+
+// ── Generate advanced levels for a completed language ─────────────────
+const ADVANCED_LEVEL_PLAN = [
+  { slug: 'design-patterns',  title: 'Design Patterns & Architecture',  topic: 'patterns de conception (singleton, factory, observer, strategy, MVC), principes SOLID, architecture logicielle', icon: '🏛️', color: '#8b5cf6', lessons: 4 },
+  { slug: 'performance',      title: 'Performance & Optimisation',      topic: 'profiling, complexité algorithmique, optimisation mémoire, caching, lazy loading, bonnes pratiques de performance', icon: '⚡', color: '#f59e0b', lessons: 4 },
+  { slug: 'testing',          title: 'Tests & Qualité de code',         topic: 'tests unitaires, tests d\'intégration, TDD, mocking, couverture de code, linting, documentation', icon: '🧪', color: '#10b981', lessons: 4 },
+  { slug: 'projet-pro',       title: 'Projet Professionnel',            topic: 'projet complet combinant patterns, performance et tests — niveau production, gestion d\'erreurs avancée, API, déploiement', icon: '💼', color: '#ec4899', lessons: 3 },
+]
+
+app.get('/api/content/generate-advanced/:langId', async (req, res) => {
+  const { langId } = req.params
+  if (!langId) return res.status(400).end('lang_id_required')
+  if (!GROQ_API_KEY) return res.status(500).end('groq_key_missing')
+
+  // SSE headers
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+  res.flushHeaders()
+
+  const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`)
+
+  try {
+    // Load existing curriculum
+    const [currRows] = await pool.query(
+      'SELECT data FROM content_items WHERE type = ? AND lang = ? AND content_key = ? LIMIT 1',
+      ['curriculum', langId, 'default']
+    )
+    let existingCurriculum = []
+    if (currRows.length) {
+      existingCurriculum = typeof currRows[0].data === 'string' ? JSON.parse(currRows[0].data) : currRows[0].data
+    }
+    const lastLevelId = existingCurriculum.reduce((max, lv) => Math.max(max, lv.id || 0), 0)
+    const lastXP = existingCurriculum.reduce((max, lv) => Math.max(max, lv.requiredXP || 0), 0)
+
+    // Find language name
+    const [langRows] = await pool.query(
+      'SELECT data FROM content_items WHERE type = ? AND lang IS NULL AND content_key = ? LIMIT 1',
+      ['languages', 'default']
+    )
+    let languageName = langId
+    if (langRows.length) {
+      const list = typeof langRows[0].data === 'string' ? JSON.parse(langRows[0].data) : langRows[0].data
+      const found = (Array.isArray(list) ? list : []).find(l => l.id === langId)
+      if (found) languageName = found.name
+    }
+
+    const totalSteps = ADVANCED_LEVEL_PLAN.length + 1
+    const newLevels = []
+
+    // Generate each advanced level
+    for (let i = 0; i < ADVANCED_LEVEL_PLAN.length; i++) {
+      const plan = ADVANCED_LEVEL_PLAN[i]
+      const levelId = lastLevelId + i + 1
+      const xp = lastXP + (i + 1) * 1000
+      const level = { ...plan, id: levelId, requiredXP: xp, lessons: plan.lessons }
+
+      send({ step: i + 1, total: totalSteps, label: `Niveau ${levelId}: ${plan.title} (${plan.lessons} lecons)...` })
+      const data = await callGroq(SYSTEM, levelPrompt(languageName, langId, level))
+      const lessons = data?.lessons || []
+      newLevels.push({
+        id: levelId,
+        slug: plan.slug,
+        title: plan.title,
+        subtitle: plan.topic,
+        icon: plan.icon,
+        color: plan.color,
+        requiredXP: xp,
+        lessons,
+      })
+      send({ step: i + 1, total: totalSteps, label: `Niveau ${levelId}: ${plan.title} — ${lessons.length} lecons ✓`, done: true })
+    }
+
+    // Generate advanced quiz questions
+    const quizStep = ADVANCED_LEVEL_PLAN.length + 1
+    send({ step: quizStep, total: totalSteps, label: 'Quiz avancés...' })
+    const quizData = await callGroq(SYSTEM, `Génère 15 questions de quiz AVANCÉES pour ${languageName} sur les thèmes: design patterns, performance, testing, architecture professionnelle.
+Retourne un JSON: { "quiz_questions": [{ "id": "q-${langId}-adv-01", "category": "avance", "difficulty": 3, "question": "...", "choices": ["a","b","c","d"], "correct": 0, "explanation": "..." }] }
+Contraintes: 15 questions, difficulty 2 à 3, spécifiques à ${languageName}.`)
+    send({ step: quizStep, total: totalSteps, label: 'Quiz avancés ✓', done: true })
+
+    // Save: append new levels to existing curriculum
+    send({ step: 'save', label: 'Sauvegarde...' })
+    const fullCurriculum = [...existingCurriculum, ...newLevels]
+    await upsertContent('curriculum', langId, 'default', fullCurriculum)
+
+    // Append advanced quiz questions to existing ones
+    const [existingQuiz] = await pool.query(
+      'SELECT data FROM content_items WHERE type = ? AND lang = ? AND content_key = ? LIMIT 1',
+      ['quiz_questions', langId, 'default']
+    )
+    let allQuiz = []
+    if (existingQuiz.length) {
+      allQuiz = typeof existingQuiz[0].data === 'string' ? JSON.parse(existingQuiz[0].data) : existingQuiz[0].data
+    }
+    allQuiz = [...(Array.isArray(allQuiz) ? allQuiz : []), ...(quizData?.quiz_questions || [])]
+    await upsertContent('quiz_questions', langId, 'default', allQuiz)
+
+    const totalLessons = newLevels.reduce((sum, lv) => sum + lv.lessons.length, 0)
+    send({ step: 'complete', stats: { levels: newLevels.length, lessons: totalLessons } })
+    res.end()
+  } catch (error) {
+    console.error('Generate advanced failed:', error)
+    send({ step: 'error', message: error.message || 'generation_failed' })
+    res.end()
+  }
+})
+
+// ── Delete a language and all its content ─────────────────────────────
+app.delete('/api/content/language/:langId', async (req, res) => {
+  const { langId } = req.params
+  if (!langId) return res.status(400).json({ error: 'lang_id_required' })
+
+  // Prevent deleting built-in languages
+  const builtIn = ['js', 'python']
+  if (builtIn.includes(langId)) {
+    return res.status(403).json({ error: 'cannot_delete_builtin' })
+  }
+
+  try {
+    // Remove all content for this language
+    await pool.query('DELETE FROM content_items WHERE lang = ?', [langId])
+
+    // Remove from languages list
+    const [currentLangs] = await pool.query(
+      'SELECT data FROM content_items WHERE type = ? AND lang IS NULL AND content_key = ? LIMIT 1',
+      ['languages', 'default']
+    )
+    if (currentLangs.length) {
+      const row = currentLangs[0]
+      let languages = typeof row.data === 'string' ? JSON.parse(row.data) : row.data
+      languages = (Array.isArray(languages) ? languages : []).filter(l => l.id !== langId)
+      languages = ensureDefaultLanguages(languages)
+      await upsertContent('languages', null, 'default', languages)
+    }
+
+    res.json({ ok: true })
+  } catch (error) {
+    console.error('Delete language failed:', error)
+    res.status(500).json({ error: 'delete_failed' })
   }
 })
 
@@ -472,10 +778,8 @@ app.post('/api/content/generate-language', async (req, res) => {
       const row = currentLangs[0]
       languages = typeof row.data === 'string' ? JSON.parse(row.data) : row.data
     }
-    if (!Array.isArray(languages)) languages = []
-    if (!languages.find(l => l.id === languageEntry.id)) {
-      languages.push(languageEntry)
-    }
+    languages = ensureDefaultLanguages(languages)
+    if (!languages.find(l => l.id === languageEntry.id)) languages.push(languageEntry)
 
     await upsertContent('languages', null, 'default', languages)
     await upsertContent('curriculum', langId, 'default', curriculum)
@@ -490,6 +794,11 @@ app.post('/api/content/generate-language', async (req, res) => {
     console.error('Generate language failed:', error)
     res.status(500).json({ error: 'generate_failed', details: error.message })
   }
+})
+
+// SPA fallback — must be AFTER all /api routes
+app.get('{*splat}', (_req, res) => {
+  res.sendFile(path.join(distPath, 'index.html'))
 })
 
 const port = Number(PORT)

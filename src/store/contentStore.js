@@ -7,8 +7,8 @@ const useContentStore = create((set, get) => ({
   loading: false,
   error: null,
 
-  load: async () => {
-    if (get().loading) return
+  load: async ({ force = false } = {}) => {
+    if (get().loading || (!force && get().ready)) return
     set({ loading: true, error: null })
     try {
       const content = await fetchAllContent()
@@ -16,6 +16,9 @@ const useContentStore = create((set, get) => ({
     } catch (error) {
       set({ error, loading: false })
     }
+  },
+  refresh: async () => {
+    return get().load({ force: true })
   },
 
   getType: (type, lang, key = 'default') => {

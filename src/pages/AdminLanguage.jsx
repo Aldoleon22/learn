@@ -55,6 +55,8 @@ export default function AdminLanguage() {
             if (data.step === 'complete') {
               setResult({ language: data.language, stats: data.stats })
               setSteps(prev => prev.map(s => ({ ...s, done: true, active: false })))
+              // Refresh content store so the new language shows immediately
+              useContentStore.getState().load({ force: true })
               continue
             }
 
